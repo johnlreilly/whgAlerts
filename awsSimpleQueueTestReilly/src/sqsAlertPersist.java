@@ -12,9 +12,11 @@
  * express or implied. See the License for the specific language governing
  * permissions and limitations under the License.
  */
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Random;
 
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.AmazonServiceException;
@@ -36,14 +38,10 @@ import com.amazonaws.services.dynamodbv2.model.TableDescription;
 import com.amazonaws.services.dynamodbv2.util.Tables;
 import com.amazonaws.services.sqs.AmazonSQS;
 import com.amazonaws.services.sqs.AmazonSQSClient;
-import com.amazonaws.services.sqs.model.CreateQueueRequest;
 import com.amazonaws.services.sqs.model.DeleteMessageRequest;
-import com.amazonaws.services.sqs.model.DeleteQueueRequest;
 import com.amazonaws.services.sqs.model.Message;
 import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
 import com.amazonaws.services.sqs.model.SendMessageRequest;
-
-import java.util.HashMap;
 
 /**
  * This sample demonstrates how to make basic requests to Amazon SQS using the
@@ -64,8 +62,31 @@ public class sqsAlertPersist {
 
 
 	static AmazonDynamoDBClient dynamoDB;
+	
+    private static void init() throws Exception {
+        /*
+         * The ProfileCredentialsProvider will return your [awsReilly]
+         * credential profile by reading from the credentials file located at
+         * (/Users/johnreilly/.aws/credentials).
+         */
+        AWSCredentials credentials = null;
+        try {
+            credentials = new ProfileCredentialsProvider("awsReilly").getCredentials();
+        } catch (Exception e) {
+            throw new AmazonClientException(
+                    "Cannot load the credentials from the credential profiles file. " +
+                    "Please make sure that your credentials file is at the correct " +
+                    "location (/Users/johnreilly/.aws/credentials), and is in valid format.",
+                    e);
+        }
+        dynamoDB = new AmazonDynamoDBClient(credentials);
+        Region usEast1 = Region.getRegion(Regions.US_EAST_1);
+        dynamoDB.setRegion(usEast1);
+    }
 
 	public static void main(String[] args) throws Exception {
+
+        init();
 
 		/*
 		 * The ProfileCredentialsProvider will return your [awsReilly]
@@ -90,10 +111,32 @@ public class sqsAlertPersist {
 
 		System.out.println("");
 		System.out.println("===========================================");
-		System.out.println("Getting Started with sqsAlertReceive");
+		System.out.println("Getting Started with sqsAlertPersist");
 		System.out.println("===========================================\n");
 
 		try {
+			
+			System.out.println("dynamodb: " + dynamoDB.toString());
+
+			String tableName = "alerts";
+
+			// Create table if it does not exist yet
+			if (Tables.doesTableExist(dynamoDB, tableName)) {
+				System.out.println("Table " + tableName + " is already ACTIVE");
+			} else {
+				// Create a table with a primary hash key named 'name', which holds a string
+				CreateTableRequest createTableRequest = new CreateTableRequest().withTableName(tableName)
+						.withKeySchema(new KeySchemaElement().withAttributeName("alertId").withKeyType(KeyType.HASH))
+						.withAttributeDefinitions(new AttributeDefinition().withAttributeName("alertId").withAttributeType(ScalarAttributeType.S))
+						.withProvisionedThroughput(new ProvisionedThroughput().withReadCapacityUnits(1L).withWriteCapacityUnits(1L));
+				TableDescription createdTableDescription = dynamoDB.createTable(createTableRequest).getTableDescription();
+				System.out.println("Created Table: " + createdTableDescription);
+
+				// Wait for it to become active
+				System.out.println("Waiting for " + tableName + " to become ACTIVE...");
+				Tables.waitForTableToBecomeActive(dynamoDB, tableName);
+			}
+			
 
 			// Receive messages
 			System.out.println("Receiving messages from " + testQueue + ".");
@@ -114,28 +157,7 @@ public class sqsAlertPersist {
 					System.out.println("    Name:  " + entry.getKey());
 					System.out.println("    Value: " + entry.getValue());
 				}
-
 				System.out.println();
-
-				// persist message
-				String tableName = "alerts";
-
-				// Create table if it does not exist yet
-				if (Tables.doesTableExist(dynamoDB, tableName)) {
-					System.out.println("Table " + tableName + " is already ACTIVE");
-				} else {
-					// Create a table with a primary hash key named 'name', which holds a string
-					CreateTableRequest createTableRequest = new CreateTableRequest().withTableName(tableName)
-							.withKeySchema(new KeySchemaElement().withAttributeName("name").withKeyType(KeyType.HASH))
-							.withAttributeDefinitions(new AttributeDefinition().withAttributeName("name").withAttributeType(ScalarAttributeType.S))
-							.withProvisionedThroughput(new ProvisionedThroughput().withReadCapacityUnits(1L).withWriteCapacityUnits(1L));
-					TableDescription createdTableDescription = dynamoDB.createTable(createTableRequest).getTableDescription();
-					System.out.println("Created Table: " + createdTableDescription);
-
-					// Wait for it to become active
-					System.out.println("Waiting for " + tableName + " to become ACTIVE...");
-					Tables.waitForTableToBecomeActive(dynamoDB, tableName);
-				}
 
 				// Add an item to DynamoDB table
 				Map<String, AttributeValue> item = newItem(message.getBody());
@@ -173,42 +195,21 @@ public class sqsAlertPersist {
 	private static Map<String, AttributeValue> newItem(String alertMessageBody) {
 		Map<String, AttributeValue> item = new HashMap<String, AttributeValue>();
 		// parse JSON in message body
-		item.put("alertSourceId", new AttributeValue("sourceID" + System.currentTimeMillis()));
-		item.put("alertDateTime", new AttributeValue("adt" + System.currentTimeMillis()));
+		
+		System.out.println("sourceID: " + String.valueOf(System.currentTimeMillis()));
+		System.out.println("something: adt" + String.valueOf(System.currentTimeMillis()));
+		System.out.println("alertmessagebody: " + alertMessageBody);		
+
+		Random rn = new Random();
+		int source = rn.nextInt(10) + 1;
+		
+		item.put("alertId", new AttributeValue(String.valueOf(System.currentTimeMillis())));
+		item.put("alertSourceId", new AttributeValue(String.valueOf(source)));
+		item.put("alertDateTime", new AttributeValue("adt" + String.valueOf(System.currentTimeMillis())));
 		item.put("alertMessageBody", new AttributeValue(alertMessageBody));
 		item.put("alertPersistedDateTime", new AttributeValue().withN(Double.toString(System.currentTimeMillis())));
 		return item;
 	}
 
-	/**
-	 * The only information needed to create a client are security credentials
-	 * consisting of the AWS Access Key ID and Secret Access Key. All other
-	 * configuration, such as the service endpoints, are performed
-	 * automatically. Client parameters, such as proxies, can be specified in an
-	 * optional ClientConfiguration object when constructing a client.
-	 *
-	 * @see com.amazonaws.auth.BasicAWSCredentials
-	 * @see com.amazonaws.auth.ProfilesConfigFile
-	 * @see com.amazonaws.ClientConfiguration
-	 */
-	private static void init() throws Exception {
-		/*
-		 * The ProfileCredentialsProvider will return your [awsReilly]
-		 * credential profile by reading from the credentials file located at
-		 * (/Users/johnreilly/.aws/credentials).
-		 */
-		AWSCredentials credentials = null;
-		try {
-			credentials = new ProfileCredentialsProvider("awsReilly").getCredentials();
-		} catch (Exception e) {
-			throw new AmazonClientException(
-					"Cannot load the credentials from the credential profiles file. " +
-							"Please make sure that your credentials file is at the correct " +
-							"location (/Users/johnreilly/.aws/credentials), and is in valid format.",
-							e);
-		}
-		dynamoDB = new AmazonDynamoDBClient(credentials);
-		Region usWest2 = Region.getRegion(Regions.US_WEST_2);
-		dynamoDB.setRegion(usWest2);
-	}
+
 }
