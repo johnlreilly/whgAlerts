@@ -107,7 +107,7 @@ public class sqsAlertPersist {
 		AmazonSQS sqs = new AmazonSQSClient(credentials);
 		Region usEast1 = Region.getRegion(Regions.US_EAST_1);
 		sqs.setRegion(usEast1);
-		String testQueue = "reillyInbound001";
+		String testQueue = "alertPersist";
 
 		System.out.println("");
 		System.out.println("===========================================");
